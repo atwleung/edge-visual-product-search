@@ -136,17 +136,139 @@ numpy
 
 # Build Product Embeddings
 
-Generate hybrid embeddings for the product catalog.
+This project builds hybrid product embeddings for visual retrieval.
 
+Each product is represented by a vector:
 
-python retrieval/mps_clip_retrieval_v21_hybrid.py build
---data-root ./data/tamiya_aircraft
---out-dir ./artifacts_v21_hybrid
---device mps
---max-images-per-product 1
---image-weight 0.6
---text-weight 0.4
+product_vector = 0.6 × image_embedding + 0.4 × title_embedding
 
+Image embeddings come from OpenCLIP, and title embeddings help separate visually similar products.
+
+The process involves three steps:
+
+Download product images
+
+Clean the dataset using YOLO
+
+Generate hybrid embeddings
+
+## Step 1 — Download Example Dataset
+
+For demonstration purposes we use Tamiya military aircraft model kits.
+
+Run the downloader:
+
+python scripts/download_tamiya_aircraft.py \
+  --out-dir data/tamiya_aircraft \
+  --max-models 100
+
+Example directory structure:
+
+data/
+  tamiya_aircraft/
+    GRUMMAN_F-14A_TOMCAT__ITEM_61029/
+      metadata.json
+      images/
+        001.jpg
+        002.jpg
+        003.jpg
+
+Each product directory contains:
+
+product title
+
+item number
+
+multiple product images
+
+## Step 2 — Prune Non-Aircraft Images
+
+The Tamiya website includes many images that are not useful for retrieval, such as:
+
+paint color charts
+
+decals
+
+parts sprues
+
+banner images
+
+catalog graphics
+
+We use YOLOv8 to remove images that are not aircraft.
+
+Run:
+
+python scripts/prune_non_aircraft_images_v2.py \
+  --data-root data/tamiya_aircraft \
+  --yolo-weights yolov8n.pt \
+  --device mps
+
+This script:
+
+detects objects in each image
+
+keeps images containing airplanes
+
+removes images containing unrelated objects
+
+rejects banner-style images
+
+This improves retrieval quality significantly.
+
+## Step 3 — Build Hybrid Product Embeddings
+
+Once the dataset is cleaned, generate product embeddings.
+
+python mps_clip_retrieval_v21_hybrid.py build \
+  --data-root ./data/tamiya_aircraft \
+  --out-dir ./artifacts_v21_hybrid \
+  --device mps \
+  --max-images-per-product 1 \
+  --image-weight 0.6 \
+  --text-weight 0.4
+
+Parameters:
+
+Parameter	Description
+--data-root	product catalog directory
+--out-dir	embedding artifacts
+--device	mps (Mac GPU) or cuda (NVIDIA GPU)
+--max-images-per-product	number of representative images
+--image-weight	weight of image embedding
+--text-weight	weight of title embedding
+
+Example output:
+
+artifacts_v21_hybrid/
+  product_vectors.npy
+  catalog_metadata.json
+
+Each product is represented by a single vector used for retrieval.
+
+## Why Use Product-Level Embeddings?
+
+Instead of indexing every product image separately, this project creates one embedding per product.
+
+Advantages:
+
+smaller vector index
+
+faster search
+
+better semantic grouping
+
+easier catalog updates
+
+When a new SKU is added:
+
+add product images
+
+generate embedding
+
+append to vector index
+
+No retraining is required.
 
 ---
 
