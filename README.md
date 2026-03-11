@@ -154,12 +154,50 @@ python retrieval/mps_clip_retrieval_v21_hybrid.py build
 
 ### Without YOLO
 
-
-python retrieval/mps_clip_retrieval_v21_hybrid.py search
---artifacts-dir ./artifacts_v21_hybrid
---query-image ./queries/f14.jpg
---device mps
-
+python mps_clip_retrieval_v21_hybrid.py search --artifacts-dir ./artifacts_v21_hybrid --query-image ./queries/f14.jpg --device mps
+[INFO] device=mps
+[INFO] loading query image...
+[INFO] embedding query image...
+[INFO] loading hybrid product catalog and searching...
+{
+  "device_used": "mps",
+  "query_image": "queries/f14.jpg",
+  "crop_meta": {
+    "detected": false,
+    "reason": "cropping_not_requested"
+  },
+  "crop_quality": {
+    "use_crop": false,
+    "reasons": [
+      "cropping_not_requested"
+    ]
+  },
+  "query_embedding_source": "original_image",
+  "top_product_hits": [
+    {
+      "score": 0.7104616761207581,
+      "item_no": "12693",
+      "title": "GRUMMAN F-14A TOMCAT (LATE MODEL) CARRIER LAUNCH SET",
+      "title_prompt": "a scale model kit product named GRUMMAN F-14A TOMCAT (LATE MODEL) CARRIER LAUNCH SET",
+      "model_dir": "data/tamiya_aircraft/GRUMMAN_F-14A_TOMCAT_LATE_MODEL_CARRIER_LAUNCH_SET__ITEM_12693",
+      "selected_images": [
+        "data/tamiya_aircraft/GRUMMAN_F-14A_TOMCAT_LATE_MODEL_CARRIER_LAUNCH_SET__ITEM_12693/images/001.jpg"
+      ],
+      "num_selected_images": 1
+    },
+    {
+      "score": 0.66544508934021,
+      "item_no": "61029",
+      "title": "GRUMMAN F-14A TOMCAT",
+      "title_prompt": "a scale model kit product named GRUMMAN F-14A TOMCAT",
+      "model_dir": "data/tamiya_aircraft/GRUMMAN_F-14A_TOMCAT__ITEM_61029",
+      "selected_images": [
+        "data/tamiya_aircraft/GRUMMAN_F-14A_TOMCAT__ITEM_61029/images/001.jpg"
+      ],
+      "num_selected_images": 1
+    }
+  ]
+}
 
 ### With YOLO crop
 
