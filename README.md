@@ -339,21 +339,37 @@ Default output returns **Top-2 product matches**.
 
 # Example Results
 
-Query: **F-14 Tomcat**
-
-
-GRUMMAN F-14A TOMCAT (LATE MODEL)
-
-GRUMMAN F-14A TOMCAT
-
-
-Query: **Space Shuttle**
-
-
-SPACE SHUTTLE ATLANTIS
-
-MCDONNELL DOUGLAS F-4J PHANTOM II
-
+python mps_clip_retrieval_v21_hybrid.py search --artifacts-dir ./artifacts_v21_hybrid --query-image ./queries/shuttle2.jpg --device mps                         
+[INFO] device=mps
+[INFO] loading query image...
+[INFO] embedding query image...
+[INFO] loading hybrid product catalog and searching...
+{
+  "device_used": "mps",
+  "query_image": "queries/shuttle2.jpg",
+  "crop_meta": {
+    "detected": false,
+    "reason": "cropping_not_requested"
+  },
+  "crop_quality": {
+    "use_crop": false,
+    "reasons": [
+      "cropping_not_requested"
+    ]
+  },
+  "query_embedding_source": "original_image",
+  "top_product_hits": [
+    {
+      "score": 0.4864608645439148,
+      "item_no": null,
+      "title": "SPACE SHUTTLE ATLANTIS",
+      "title_prompt": "a scale model kit product named SPACE SHUTTLE ATLANTIS",
+      "model_dir": "data/tamiya_aircraft/SPACE_SHUTTLE_ATLANTIS",
+      "selected_images": [
+        "data/tamiya_aircraft/SPACE_SHUTTLE_ATLANTIS/images/001.jpg"
+      ],
+      "num_selected_images": 1
+    }
 
 ---
 
