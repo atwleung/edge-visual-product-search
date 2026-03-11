@@ -155,6 +155,8 @@ python retrieval/mps_clip_retrieval_v21_hybrid.py build
 ### Without YOLO
 
 python mps_clip_retrieval_v21_hybrid.py search --artifacts-dir ./artifacts_v21_hybrid --query-image ./queries/f14.jpg --device mps
+
+
 [INFO] device=mps
 [INFO] loading query image...
 [INFO] embedding query image...
