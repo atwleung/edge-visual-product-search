@@ -326,7 +326,7 @@ python mps_clip_retrieval_v21_hybrid.py search --artifacts-dir ./artifacts_v21_h
 ### With YOLO crop
 
 
-python retrieval/mps_clip_retrieval_v21_hybrid.py search
+python mps_clip_retrieval_v21_hybrid.py search
 --artifacts-dir ./artifacts_v21_hybrid
 --query-image ./queries/f14.jpg
 --yolo-weights yolov8n.pt
