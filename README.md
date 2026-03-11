@@ -64,6 +64,13 @@ F-14 Tomcat vs F-4 Phantom look similar visually, but title embeddings help sepa
 
 ---
 
+## Example Queries
+
+| Query | Description |
+|------|-------------|
+| ![](queries/f14.jpg) | F-14 Tomcat aircraft |
+| ![](queries/shuttle2.jpg) | Space Shuttle Atlantis |
+
 ## YOLO Crop Quality Gate
 
 YOLO detection is **optional** and guarded by a quality gate.
