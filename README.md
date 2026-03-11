@@ -371,6 +371,8 @@ python mps_clip_retrieval_v21_hybrid.py search --artifacts-dir ./artifacts_v21_h
       "num_selected_images": 1
     }
 
+which belongs to this Tamiya model: https://www.tamiya.com/english/products/60402/index.html
+
 ---
 
 # Dataset Example
