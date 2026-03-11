@@ -1,0 +1,6 @@
+torch
+torchvision
+ultralytics
+open_clip_torch
+Pillow
+numpy

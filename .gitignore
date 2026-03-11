@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+
+# macOS
+.DS_Store
+
+# Ultralytics / YOLO runs
+runs/
+*.pt
+*.onnx
+*.engine
+
+# Data / media
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.jpeg
+*.png
+dataset/
+data/
+outputs/
+
+# Allow documentation images
+!docs/
+!docs/*.png
+!docs/*.jpg
+!docs/*.jpeg
+
+# Logs
+*.log
+
+# editor backup files
+*~
