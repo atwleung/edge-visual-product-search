@@ -49,7 +49,7 @@ The edge node does not need to maintain session state, which simplifies:
 - load balancing
 - horizontal replication across edge nodes
 
-This stateless design aligns well with typical CDN request-processing models.
+This stateless design aligns well with typical **CDN request-processing models**.
 
 ## 3. Minimal Data Transfer
 
