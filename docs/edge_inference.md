@@ -73,10 +73,11 @@ Vector similarity search scales well for product catalogs.
 
 Typical performance:
 
-Catalog Size	Search Latency
-1k products	<1 ms
-10k products	~2 ms
-100k products	~5 ms
+|Catalog Size|	Search Latency|
+|------|------|
+|1k products|	<1 ms|
+|10k products|	~2 ms|
+|100k products|	~5 ms|
 
 This means that the latency bottleneck is usually the embedding model, not the vector search.
 
