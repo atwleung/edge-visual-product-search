@@ -316,10 +316,11 @@ def collect_products(data_root: Path, max_images_per_product: int = 1) -> List[D
     Prefer exact primary images:
     001, 002, 003
 
-    Do NOT automatically fall through to 010/011/012
-    unless no earlier image exists at all.
+    If more images are requested, fill remaining slots using the next
+    numerically sorted images that were not already selected.
 
-    For current aircraft use case, max_images_per_product=1 is recommended.
+    This keeps primary images first, while still allowing more coverage
+    when max_images_per_product > 3.
     """
     products = []
 
@@ -347,20 +348,29 @@ def collect_products(data_root: Path, max_images_per_product: int = 1) -> List[D
         if not all_images:
             continue
 
-        name_to_path = {p.name.lower(): p for p in all_images}
+        all_images_sorted = sorted(all_images, key=lambda x: extract_numeric_prefix(x.name))
+        name_to_path = {p.name.lower(): p for p in all_images_sorted}
 
         selected = []
+
+        # 1) Prefer 001 / 002 / 003 first
         for name in preferred_names:
             p = name_to_path.get(name.lower())
-            if p is not None:
+            if p is not None and p not in selected:
                 selected.append(p)
             if len(selected) >= max_images_per_product:
                 break
 
-        # Fallback only if 001/002/003 are completely missing.
+        # 2) If caller wants more, fill from remaining sorted images
+        if len(selected) < max_images_per_product:
+            for p in all_images_sorted:
+                if p not in selected:
+                    selected.append(p)
+                if len(selected) >= max_images_per_product:
+                    break
+
         if not selected:
-            all_images_sorted = sorted(all_images, key=lambda x: extract_numeric_prefix(x.name))
-            selected = [all_images_sorted[0]]
+            continue
 
         products.append({
             "item_no": item_no,
@@ -371,6 +381,7 @@ def collect_products(data_root: Path, max_images_per_product: int = 1) -> List[D
         })
 
     return products
+
 
 
 # ============================================================
