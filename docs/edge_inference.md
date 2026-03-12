@@ -19,9 +19,10 @@ Compared with large generative AI models, these models:
 
 Typical memory requirements:
 
-Model	Approx VRAM
-YOLOv8n	~0.5–1 GB
-OpenCLIP ViT-B	~1–2 GB
+|Model	|Approx VRAM|
+| -------- | -------- |
+|YOLOv8n|~0.5–1 GB|
+|OpenCLIP ViT-B|~1–2 GB|
 
 This makes them practical to deploy on edge GPUs such as RTX 4000 or RTX 6000.
 
