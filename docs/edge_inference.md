@@ -51,21 +51,21 @@ This stateless design aligns well with typical **CDN request-processing models**
 
 ## 3. Minimal Data Transfer
 
-Instead of sending large images to a central service, the edge node can compute an embedding vector locally.
+Instead of sending large images to a central service, the edge node can compute an **embedding vector locally.**
 
 A CLIP embedding typically contains:
 
+```text
 512 floating point values
+```
 
 which is only a few kilobytes.
 
 Therefore the architecture can:
 
-process images at the edge
-
-send only the embedding vector to a central index
-
-dramatically reduce bandwidth requirements
+- process images at the edge
+- send only the embedding vector to a central index
+- dramatically reduce bandwidth requirements
 
 ## 4. Vector Search Is Extremely Fast
 
