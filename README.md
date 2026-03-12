@@ -99,7 +99,7 @@ This pipeline works well on **edge GPUs** because:
 
 Additional technical discussion is available in the documentation:
 
-- [Why This Architecture Works Well for Edge Inference](docs/edge_inference_architecture.md)
+- [Why This Architecture Works Well for Edge Inference](docs/edge_inference.md)
 
 The same code supports:
 
