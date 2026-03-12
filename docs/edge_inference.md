@@ -91,39 +91,38 @@ Embedding-based retrieval avoids this.
 
 Adding a new SKU simply requires:
 
-Generate embedding
-Append to vector index
+- Generate embedding
+- Append to vector index
 
 No model retraining is required.
 
-This property is extremely useful for eCommerce catalogs where inventory changes frequently.
+This property is extremely useful for **eCommerce catalogs where inventory changes frequently.**
 
 ## 6. Edge-Friendly Compute Profile
 
 Compared with other AI workloads, this pipeline has a favorable compute profile.
 
-Workload	Edge Suitability
-LLM inference	Poor
-Training models	Poor
-Recommendation systems	Medium
-Embedding + vector search	Excellent
+|Workload	|Edge Suitability|
+|-------|------|
+|LLM inference	|Poor|
+|Training models	|Poor|
+|Recommendation systems	|Medium|
+|Embedding + vector search	|Excellent|
 
 Embedding models are:
 
-smaller
+- smaller
+- deterministic
+- highly parallelizable
+- easy to cache
 
-deterministic
-
-highly parallelizable
-
-easy to cache
-
-For these reasons, embedding-based retrieval is one of the most practical AI workloads for edge deployment.
+For these reasons, **embedding-based retrieval is one of the most practical AI workloads for edge deployment.**
 
 ## Example Edge Deployment Model
 
 A practical deployment architecture could look like this:
 
+```text
 User uploads photo
         │
         ▼
@@ -138,14 +137,13 @@ Regional Service
         │
         ▼
 Results returned to user
+```
 
 This architecture minimizes:
 
-round-trip latency
-
-bandwidth consumption
-
-central compute load
+- round-trip latency
+- bandwidth consumption
+- central compute load
 
 ## Summary
 
