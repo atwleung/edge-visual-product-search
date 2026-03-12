@@ -40,7 +40,7 @@ Optional YOLO detection
 CLIP embedding
    ↓
 Vector similarity search
-```text
+```
 
 The edge node does not need to maintain session state, which simplifies:
 
