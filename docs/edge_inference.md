@@ -151,14 +151,10 @@ This project demonstrates how a modern visual retrieval pipeline can be implemen
 
 Key characteristics include:
 
-lightweight models
+- lightweight models
+- stateless request processing
+- small data transfer
+- fast vector search
+- incremental catalog updates
 
-stateless request processing
-
-small data transfer
-
-fast vector search
-
-incremental catalog updates
-
-Together, these properties make embedding-based visual search a strong candidate for edge AI deployment.
+Together, these properties make **embedding-based visual search a strong candidate for edge AI deployment.**

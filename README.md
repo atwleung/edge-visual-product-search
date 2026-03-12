@@ -97,18 +97,23 @@ This pipeline works well on **edge GPUs** because:
 - vector search is fast
 - no large language model required
 
+Additional technical discussion is available in the documentation:
+
+- [Why This Architecture Works Well for Edge Inference](docs/edge_inference_architecture.md)
+
 The same code supports:
 
 Mac GPU:
 
+```text
 --device mps
-
+```
 
 NVIDIA GPU:
 
-
+```text
 --device cuda
-
+```
 
 ---
 
