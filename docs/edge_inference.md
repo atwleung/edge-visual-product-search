@@ -32,6 +32,7 @@ This makes them practical to deploy on edge GPUs such as RTX 4000 or RTX 6000.
 
 Each search request is completely independent:
 
+```text
 User Image
    ↓
 Optional YOLO detection
@@ -39,16 +40,14 @@ Optional YOLO detection
 CLIP embedding
    ↓
 Vector similarity search
+```text
 
 The edge node does not need to maintain session state, which simplifies:
 
-scaling
-
-caching
-
-load balancing
-
-horizontal replication across edge nodes
+- scaling
+- caching
+- load balancing
+- horizontal replication across edge nodes
 
 This stateless design aligns well with typical CDN request-processing models.
 
