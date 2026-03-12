@@ -8,17 +8,14 @@ Several design choices make this architecture particularly suitable for edge dep
 
 The pipeline relies on two lightweight vision models:
 
-YOLOv8 (nano) for optional object detection
-
-OpenCLIP for generating image embeddings
+- **YOLOv8 (nano)** for optional object detection
+- **OpenCLIP** for generating image embeddings
 
 Compared with large generative AI models, these models:
 
-have small memory footprints
-
-have predictable inference latency
-
-run efficiently on modest GPUs
+- have **small memory footprints**
+- have **predictable inference latency**
+- run efficiently on modest GPUs
 
 Typical memory requirements:
 
