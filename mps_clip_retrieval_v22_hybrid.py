@@ -172,23 +172,23 @@ def search(args):
             "device_used": device,
         }
 
-records = meta["records"]
+    records = meta["records"]
 
-results = []
-for v, i in zip(vals, idxs):
-    idx = int(i.item())
-    m = records[idx]
+    results = []
+    for v, i in zip(vals, idxs):
+        idx = int(i.item())
+        m = records[idx]
 
-    results.append(
-        {
-            "score": float(v.item()),
-            "item_no": m.get("item_no"),
-            "title": m["title"],
-            "model_dir": m["model_dir"],
-            "selected_images": m["selected_images"],
-            "num_selected_images": m["num_selected_images"],
-        }
-    )
+        results.append(
+            {
+                "score": float(v.item()),
+                "item_no": m.get("item_no"),
+                "title": m["title"],
+                "model_dir": m["model_dir"],
+                "selected_images": m["selected_images"],
+                "num_selected_images": m["num_selected_images"],
+            }
+        )
     
     return {
         "match": True,
