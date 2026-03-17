@@ -576,6 +576,7 @@ class TorchHybridProductSearch:
         embeddings_cpu = torch.load(
             artifacts_dir / "product_hybrid_embeddings.pt",
             map_location="cpu",
+            weights_only=True
         )
 
         # Main FAISS replacement tensor placement:
