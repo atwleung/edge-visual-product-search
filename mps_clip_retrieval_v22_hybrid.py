@@ -159,7 +159,7 @@ def search(args):
     topk = min(args.topk, len(scores))
     vals, idxs = torch.topk(scores, topk)
 
-    top_score = float(vals[0])
+    top_score = float(vals[0].item())
 
     # ----------------------------
     # NEW: no-match gate
@@ -172,21 +172,24 @@ def search(args):
             "device_used": device,
         }
 
-    results = []
-    for v, i in zip(vals, idxs):
-        m = meta[i]
+records = meta["records"]
 
-        results.append(
-            {
-                "score": float(v),
-                "item_no": m.get("item_no"),
-                "title": m["title"],
-                "model_dir": m["model_dir"],
-                "selected_images": m["images"],
-                "num_selected_images": len(m["images"]),
-            }
-        )
+results = []
+for v, i in zip(vals, idxs):
+    idx = int(i.item())
+    m = records[idx]
 
+    results.append(
+        {
+            "score": float(v.item()),
+            "item_no": m.get("item_no"),
+            "title": m["title"],
+            "model_dir": m["model_dir"],
+            "selected_images": m["selected_images"],
+            "num_selected_images": m["num_selected_images"],
+        }
+    )
+    
     return {
         "match": True,
         "device_used": device,
