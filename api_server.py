@@ -17,7 +17,7 @@ from ultralytics import YOLO
 # ============================================================
 
 APP_TITLE = "Edge Visual Product Search"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.0"
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -26,7 +26,7 @@ ARTIFACT_DIR = Path("/root/Desktop/image_search/artifacts_v21_hybrid")
 EMBEDDINGS_PATH = ARTIFACT_DIR / "product_hybrid_embeddings.pt"
 METADATA_PATH = ARTIFACT_DIR / "product_hybrid_metadata.json"
 
-# ---- optional yolo detector ----
+# ---- optional detector ----
 YOLO_MODEL_PATH = BASE_DIR / "best.pt"
 
 # ---- CLIP ----
@@ -55,7 +55,6 @@ ALLOWED_CONTENT_TYPES = {
 # Domain mapping
 # ============================================================
 
-# query-domain -> allowed result domains
 ALLOWED_QUERY_TO_RESULT_DOMAINS = {
     "aircraft": {"aircraft"},
     "tank": {"tank", "afv", "military_vehicle"},
@@ -64,7 +63,6 @@ ALLOWED_QUERY_TO_RESULT_DOMAINS = {
     "train": {"train", "rail"},
 }
 
-# YOLO coarse class -> query domain
 YOLO_CLASSNAME_TO_DOMAIN = {
     "airplane": "aircraft",
     "plane": "aircraft",
@@ -78,7 +76,6 @@ YOLO_CLASSNAME_TO_DOMAIN = {
     "train": "train",
 }
 
-# title heuristic fallback if metadata domain is missing
 TITLE_KEYWORD_TO_DOMAIN = {
     "bf": "aircraft",
     "f-": "aircraft",
@@ -208,6 +205,36 @@ def load_embeddings_pt(path: Path) -> torch.Tensor:
     return emb.float()
 
 
+def load_metadata_records(path: Path) -> List[Dict[str, Any]]:
+    with open(path, "r", encoding="utf-8") as f:
+        metadata_obj = json.load(f)
+
+    if isinstance(metadata_obj, list):
+        records = metadata_obj
+        print("[startup] metadata loaded as top-level list")
+    elif isinstance(metadata_obj, dict):
+        for key in ["records", "items", "products", "metadata", "data"]:
+            value = metadata_obj.get(key)
+            if isinstance(value, list):
+                records = value
+                print(f"[startup] metadata list found under key '{key}'")
+                break
+        else:
+            raise RuntimeError(
+                f"Metadata JSON is a dict but no known list field was found. "
+                f"Top-level keys: {list(metadata_obj.keys())}"
+            )
+    else:
+        raise RuntimeError(
+            f"Unsupported metadata JSON type: {type(metadata_obj).__name__}"
+        )
+
+    if not all(isinstance(x, dict) for x in records):
+        raise RuntimeError("Metadata records must all be JSON objects")
+
+    return records
+
+
 # ============================================================
 # Startup
 # ============================================================
@@ -242,13 +269,7 @@ def startup_event() -> None:
     if not METADATA_PATH.exists():
         raise RuntimeError(f"Metadata not found: {METADATA_PATH}")
 
-    with open(METADATA_PATH, "r", encoding="utf-8") as f:
-        metadata_obj = json.load(f)
-
-    if not isinstance(metadata_obj, list):
-        raise RuntimeError("Metadata JSON must be a list")
-
-    metadata = metadata_obj
+    metadata = load_metadata_records(METADATA_PATH)
 
     # ---- embeddings ----
     if not EMBEDDINGS_PATH.exists():
@@ -311,9 +332,8 @@ def detect_and_crop_best(
             None,
         )
 
-    device_arg: Any
     if DEVICE_NAME == "cuda":
-        device_arg = 0
+        device_arg: Any = 0
     elif DEVICE_NAME == "mps":
         device_arg = "mps"
     else:
@@ -441,7 +461,7 @@ def search_torch(query_vec: torch.Tensor, top_k: int = TOP_K) -> Tuple[List[floa
     assert db_embeddings is not None
 
     maybe_sync_device()
-    scores = torch.matmul(db_embeddings, query_vec)  # [N]
+    scores = torch.matmul(db_embeddings, query_vec)
     k = min(top_k, int(scores.shape[0]))
     topk_scores, topk_indices = torch.topk(scores, k=k)
     maybe_sync_device()
@@ -618,43 +638,35 @@ async def search_image(image: UploadFile = File(...)) -> Dict[str, Any]:
     t0 = now_ms()
     timings: Dict[str, float] = {}
 
-    # read upload
     t = now_ms()
     raw = await image.read()
     timings["read_upload"] = elapsed_ms(t)
 
-    # decode image
     t = now_ms()
     pil_image = load_image_from_upload(image, raw)
     timings["decode_image"] = elapsed_ms(t)
 
-    # detect and crop
     t = now_ms()
     chosen_image, crop_meta, crop_quality, query_domain = detect_and_crop_best(pil_image)
     maybe_sync_device()
     timings["detect_and_crop"] = elapsed_ms(t)
 
-    # clip embedding
     t = now_ms()
     query_vec = embed_image(chosen_image)
     timings["clip_embedding"] = elapsed_ms(t)
 
-    # torch retrieval
     t = now_ms()
     scores, indices = search_torch(query_vec, top_k=TOP_K)
     timings["torch_search"] = elapsed_ms(t)
 
-    # build hits
     t = now_ms()
     hits = build_hits(scores, indices)
     timings["build_hits"] = elapsed_ms(t)
 
-    # domain gate
     t = now_ms()
     gated_hits, domain_gate = apply_domain_gating(hits, query_domain)
     timings["domain_gating"] = elapsed_ms(t)
 
-    # confidence gate
     t = now_ms()
     confidence_gate = apply_confidence_gate(gated_hits)
     timings["confidence_gating"] = elapsed_ms(t)
