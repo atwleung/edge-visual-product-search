@@ -4,9 +4,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import faiss
-import numpy as np
 import torch
+import torch.nn.functional as F
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from PIL import Image
 from pydantic import BaseModel
@@ -17,37 +16,34 @@ from ultralytics import YOLO
 # Configuration
 # ============================================================
 
-APP_TITLE = "YOLO + CLIP Retrieval API"
-APP_VERSION = "1.0.0"
+APP_TITLE = "Edge Visual Product Search"
+APP_VERSION = "2.1.0"
 
 BASE_DIR = Path(__file__).resolve().parent
 
-YOLO_MODEL_PATH = BASE_DIR / "best.pt"
-FAISS_INDEX_PATH = BASE_DIR / "index.faiss"
-METADATA_PATH = BASE_DIR / "metadata.json"
+# ---- artifacts ----
+ARTIFACT_DIR = Path("/root/Desktop/image_search/artifacts_v21_hybrid")
+EMBEDDINGS_PATH = ARTIFACT_DIR / "product_hybrid_embeddings.pt"
+METADATA_PATH = ARTIFACT_DIR / "product_hybrid_metadata.json"
 
-# Hugging Face CLIP model
+# ---- optional yolo detector ----
+YOLO_MODEL_PATH = BASE_DIR / "best.pt"
+
+# ---- CLIP ----
 CLIP_MODEL_NAME = "openai/clip-vit-base-patch32"
 
-# Retrieval params
+# ---- retrieval / gating ----
 TOP_K = 5
 FINAL_TOP_K = 3
-
-# Confidence gate
 MIN_TOP1_SCORE = 0.52
 MIN_TOP1_TOP2_MARGIN = 0.015
 
-# Domain gating
 ENABLE_DOMAIN_GATING = True
-
-# Detection
 ENABLE_CROPPING = True
 YOLO_CONF_THRESHOLD = 0.25
 
-# Input image limits
+# ---- input limits ----
 MAX_IMAGE_BYTES = 12 * 1024 * 1024  # 12 MB
-
-# Allowed upload content-types
 ALLOWED_CONTENT_TYPES = {
     "image/jpeg",
     "image/jpg",
@@ -55,11 +51,12 @@ ALLOWED_CONTENT_TYPES = {
     "image/webp",
 }
 
-# Optional domain label mapping:
-# metadata item may contain "domain"
-# e.g. {"title":"...", "item_no":"...", "domain":"aircraft"}
+# ============================================================
+# Domain mapping
+# ============================================================
+
+# query-domain -> allowed result domains
 ALLOWED_QUERY_TO_RESULT_DOMAINS = {
-    # detected_query_domain: set of allowed candidate domains
     "aircraft": {"aircraft"},
     "tank": {"tank", "afv", "military_vehicle"},
     "warship": {"warship", "naval"},
@@ -67,76 +64,64 @@ ALLOWED_QUERY_TO_RESULT_DOMAINS = {
     "train": {"train", "rail"},
 }
 
-# If YOLO class names map to business domains, put them here
+# YOLO coarse class -> query domain
 YOLO_CLASSNAME_TO_DOMAIN = {
     "airplane": "aircraft",
     "plane": "aircraft",
+    "aircraft": "aircraft",
     "tank": "tank",
     "ship": "warship",
     "boat": "warship",
+    "warship": "warship",
     "car": "car",
+    "vehicle": "car",
     "train": "train",
 }
 
-# If you have a fixed allowed title keyword-based heuristic fallback:
+# title heuristic fallback if metadata domain is missing
 TITLE_KEYWORD_TO_DOMAIN = {
-    "Bf": "aircraft",
-    "F-": "aircraft",
-    "A6M": "aircraft",
-    "Spitfire": "aircraft",
-    "Tiger": "tank",
-    "Panzer": "tank",
-    "Yamato": "warship",
-    "Destroyer": "warship",
+    "bf": "aircraft",
+    "f-": "aircraft",
+    "a6m": "aircraft",
+    "spitfire": "aircraft",
+    "nakajima": "aircraft",
+    "panzer": "tank",
+    "tiger": "tank",
+    "yamato": "warship",
+    "destroyer": "warship",
 }
 
+# ============================================================
+# Device selection
+# ============================================================
+
+if torch.cuda.is_available():
+    DEVICE = torch.device("cuda")
+    DEVICE_NAME = "cuda"
+elif torch.backends.mps.is_available():
+    DEVICE = torch.device("mps")
+    DEVICE_NAME = "mps"
+else:
+    DEVICE = torch.device("cpu")
+    DEVICE_NAME = "cpu"
+
+USE_FP16 = DEVICE_NAME == "cuda"
 
 # ============================================================
-# Utilities
+# App / globals
 # ============================================================
 
-def now_ms() -> float:
-    return time.perf_counter() * 1000.0
+app = FastAPI(title=APP_TITLE, version=APP_VERSION)
 
+clip_model: Optional[CLIPModel] = None
+clip_processor: Optional[CLIPProcessor] = None
+yolo_model: Optional[YOLO] = None
 
-def elapsed_ms(start_ms: float) -> float:
-    return round(now_ms() - start_ms, 3)
-
-
-def softmax_np(x: np.ndarray) -> np.ndarray:
-    e = np.exp(x - np.max(x))
-    return e / np.sum(e)
-
-
-def pil_to_rgb(image: Image.Image) -> Image.Image:
-    if image.mode != "RGB":
-        image = image.convert("RGB")
-    return image
-
-
-def normalize_embedding(vec: np.ndarray) -> np.ndarray:
-    norm = np.linalg.norm(vec)
-    if norm == 0:
-        return vec
-    return vec / norm
-
-
-def infer_domain_from_title(title: str) -> Optional[str]:
-    for keyword, domain in TITLE_KEYWORD_TO_DOMAIN.items():
-        if keyword.lower() in title.lower():
-            return domain
-    return None
-
-
-def safe_float(x: Any) -> Optional[float]:
-    try:
-        return float(x)
-    except Exception:
-        return None
-
+metadata: List[Dict[str, Any]] = []
+db_embeddings: Optional[torch.Tensor] = None  # [N, D], normalized, on DEVICE
 
 # ============================================================
-# Response models
+# Response schema
 # ============================================================
 
 class SearchResponse(BaseModel):
@@ -151,20 +136,76 @@ class SearchResponse(BaseModel):
     top_product_hits: List[Dict[str, Any]]
     timings_ms: Dict[str, float]
 
+# ============================================================
+# Utility helpers
+# ============================================================
+
+def now_ms() -> float:
+    return time.perf_counter() * 1000.0
+
+
+def elapsed_ms(start_ms: float) -> float:
+    return round(now_ms() - start_ms, 3)
+
+
+def maybe_sync_device() -> None:
+    if DEVICE_NAME == "cuda":
+        torch.cuda.synchronize()
+
+
+def pil_to_rgb(image: Image.Image) -> Image.Image:
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    return image
+
+
+def safe_float(x: Any) -> Optional[float]:
+    try:
+        return float(x)
+    except Exception:
+        return None
+
+
+def infer_domain_from_title(title: str) -> Optional[str]:
+    t = title.lower()
+    for keyword, domain in TITLE_KEYWORD_TO_DOMAIN.items():
+        if keyword in t:
+            return domain
+    return None
+
+
+def normalize_torch_rows(x: torch.Tensor) -> torch.Tensor:
+    return F.normalize(x, dim=1)
+
+
+def normalize_torch_vec(x: torch.Tensor) -> torch.Tensor:
+    return F.normalize(x, dim=0)
+
 
 # ============================================================
-# App / global state
+# Loading helpers
 # ============================================================
 
-app = FastAPI(title=APP_TITLE, version=APP_VERSION)
+def load_embeddings_pt(path: Path) -> torch.Tensor:
+    emb_obj = torch.load(path, map_location="cpu", weights_only=True)
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+    if isinstance(emb_obj, torch.Tensor):
+        emb = emb_obj
+    elif isinstance(emb_obj, dict):
+        if "embeddings" in emb_obj and isinstance(emb_obj["embeddings"], torch.Tensor):
+            emb = emb_obj["embeddings"]
+        else:
+            raise RuntimeError(
+                f"Unsupported dict structure in {path}. "
+                f"Expected key 'embeddings' containing a Tensor."
+            )
+    else:
+        raise RuntimeError(f"Unsupported embedding format in {path}: {type(emb_obj)}")
 
-clip_model: Optional[CLIPModel] = None
-clip_processor: Optional[CLIPProcessor] = None
-yolo_model: Optional[YOLO] = None
-faiss_index = None
-metadata: List[Dict[str, Any]] = []
+    if emb.ndim != 2:
+        raise RuntimeError(f"Embeddings must be 2D, got shape={tuple(emb.shape)}")
+
+    return emb.float()
 
 
 # ============================================================
@@ -173,75 +214,87 @@ metadata: List[Dict[str, Any]] = []
 
 @app.on_event("startup")
 def startup_event() -> None:
-    global clip_model, clip_processor, yolo_model, faiss_index, metadata
+    global clip_model, clip_processor, yolo_model, metadata, db_embeddings
 
-    print(f"[startup] device={device}")
+    print(f"[startup] device={DEVICE_NAME}")
+    print(f"[startup] embeddings_path={EMBEDDINGS_PATH}")
+    print(f"[startup] metadata_path={METADATA_PATH}")
+    print(f"[startup] yolo_path={YOLO_MODEL_PATH}")
 
-    # Load CLIP
+    # ---- CLIP ----
     clip_processor = CLIPProcessor.from_pretrained(CLIP_MODEL_NAME)
     clip_model = CLIPModel.from_pretrained(CLIP_MODEL_NAME)
-    clip_model.to(device)
+    clip_model.to(DEVICE)
     clip_model.eval()
 
-    # Optional FP16 on CUDA
-    if device == "cuda":
+    if USE_FP16:
         clip_model = clip_model.half()
 
-    # Load YOLO
+    # ---- YOLO (optional) ----
     if YOLO_MODEL_PATH.exists():
         yolo_model = YOLO(str(YOLO_MODEL_PATH))
+        print(f"[startup] YOLO loaded from {YOLO_MODEL_PATH}")
     else:
-        print(f"[startup] WARNING: YOLO model not found at {YOLO_MODEL_PATH}")
         yolo_model = None
+        print(f"[startup] WARNING: YOLO model not found at {YOLO_MODEL_PATH}")
 
-    # Load FAISS
-    if not FAISS_INDEX_PATH.exists():
-        raise RuntimeError(f"FAISS index not found: {FAISS_INDEX_PATH}")
-    faiss_index = faiss.read_index(str(FAISS_INDEX_PATH))
-
-    # Load metadata
+    # ---- metadata ----
     if not METADATA_PATH.exists():
         raise RuntimeError(f"Metadata not found: {METADATA_PATH}")
+
     with open(METADATA_PATH, "r", encoding="utf-8") as f:
-        metadata = json.load(f)
+        metadata_obj = json.load(f)
+
+    if not isinstance(metadata_obj, list):
+        raise RuntimeError("Metadata JSON must be a list")
+
+    metadata = metadata_obj
+
+    # ---- embeddings ----
+    if not EMBEDDINGS_PATH.exists():
+        raise RuntimeError(f"Embeddings not found: {EMBEDDINGS_PATH}")
+
+    emb = load_embeddings_pt(EMBEDDINGS_PATH)
+
+    if emb.shape[0] != len(metadata):
+        raise RuntimeError(
+            f"Embeddings rows ({emb.shape[0]}) do not match metadata length ({len(metadata)})"
+        )
+
+    emb = normalize_torch_rows(emb)
+    db_embeddings = emb.to(DEVICE)
 
     print(f"[startup] metadata_count={len(metadata)}")
+    print(f"[startup] embeddings_shape={tuple(db_embeddings.shape)}")
     print("[startup] ready")
 
-
 # ============================================================
-# Core logic
+# Image helpers
 # ============================================================
 
 def load_image_from_upload(upload: UploadFile, raw_bytes: bytes) -> Image.Image:
     if upload.content_type and upload.content_type.lower() not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported content type: {upload.content_type}"
+            detail=f"Unsupported content type: {upload.content_type}",
         )
 
     if len(raw_bytes) > MAX_IMAGE_BYTES:
         raise HTTPException(
             status_code=413,
-            detail=f"File too large ({len(raw_bytes)} bytes). Max allowed is {MAX_IMAGE_BYTES} bytes."
+            detail=f"File too large ({len(raw_bytes)} bytes). Max allowed is {MAX_IMAGE_BYTES} bytes.",
         )
 
     try:
         image = Image.open(io.BytesIO(raw_bytes))
-        image = pil_to_rgb(image)
-        return image
+        return pil_to_rgb(image)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid image file: {e}")
 
 
-def detect_and_crop_best(image: Image.Image) -> Tuple[Image.Image, Dict[str, Any], Dict[str, Any], Optional[str]]:
-    """
-    Returns:
-        chosen_image,
-        crop_meta,
-        crop_quality,
-        query_domain
-    """
+def detect_and_crop_best(
+    image: Image.Image,
+) -> Tuple[Image.Image, Dict[str, Any], Dict[str, Any], Optional[str]]:
     if not ENABLE_CROPPING:
         return (
             image,
@@ -258,11 +311,19 @@ def detect_and_crop_best(image: Image.Image) -> Tuple[Image.Image, Dict[str, Any
             None,
         )
 
+    device_arg: Any
+    if DEVICE_NAME == "cuda":
+        device_arg = 0
+    elif DEVICE_NAME == "mps":
+        device_arg = "mps"
+    else:
+        device_arg = "cpu"
+
     results = yolo_model.predict(
-        source=np.array(image),
+        source=image,
         conf=YOLO_CONF_THRESHOLD,
         verbose=False,
-        device=0 if device == "cuda" else "cpu",
+        device=device_arg,
     )
 
     if not results:
@@ -283,14 +344,13 @@ def detect_and_crop_best(image: Image.Image) -> Tuple[Image.Image, Dict[str, Any
             None,
         )
 
-    best_idx = None
+    names = r.names if hasattr(r, "names") else {}
+
     best_conf = -1.0
     best_cls_name = None
     best_xyxy = None
 
-    names = r.names if hasattr(r, "names") else {}
-
-    for i, box in enumerate(boxes):
+    for box in boxes:
         conf = float(box.conf[0].item())
         cls_id = int(box.cls[0].item())
         cls_name = names.get(cls_id, str(cls_id))
@@ -298,11 +358,10 @@ def detect_and_crop_best(image: Image.Image) -> Tuple[Image.Image, Dict[str, Any
 
         if conf > best_conf:
             best_conf = conf
-            best_idx = i
             best_cls_name = cls_name
             best_xyxy = xyxy
 
-    if best_idx is None or best_xyxy is None:
+    if best_xyxy is None:
         return (
             image,
             {"detected": False, "reason": "best_box_not_found"},
@@ -353,34 +412,51 @@ def detect_and_crop_best(image: Image.Image) -> Tuple[Image.Image, Dict[str, Any
 
     return (crop if use_crop else image, crop_meta, crop_quality, query_domain)
 
+# ============================================================
+# Embedding / retrieval
+# ============================================================
 
 @torch.no_grad()
-def embed_image(image: Image.Image) -> np.ndarray:
+def embed_image(image: Image.Image) -> torch.Tensor:
     assert clip_model is not None
     assert clip_processor is not None
 
     inputs = clip_processor(images=image, return_tensors="pt")
-    pixel_values = inputs["pixel_values"].to(device)
+    pixel_values = inputs["pixel_values"].to(DEVICE)
 
-    if device == "cuda":
+    if USE_FP16:
         pixel_values = pixel_values.half()
 
+    maybe_sync_device()
     image_features = clip_model.get_image_features(pixel_values=pixel_values)
-    vec = image_features[0].detach().float().cpu().numpy().astype(np.float32)
-    vec = normalize_embedding(vec)
+    maybe_sync_device()
+
+    vec = image_features[0].detach().float()
+    vec = normalize_torch_vec(vec)
     return vec
 
 
-def search_faiss(query_vec: np.ndarray, top_k: int = TOP_K) -> Tuple[np.ndarray, np.ndarray]:
-    assert faiss_index is not None
-    query = np.expand_dims(query_vec.astype(np.float32), axis=0)
-    scores, indices = faiss_index.search(query, top_k)
-    return scores[0], indices[0]
+@torch.no_grad()
+def search_torch(query_vec: torch.Tensor, top_k: int = TOP_K) -> Tuple[List[float], List[int]]:
+    assert db_embeddings is not None
+
+    maybe_sync_device()
+    scores = torch.matmul(db_embeddings, query_vec)  # [N]
+    k = min(top_k, int(scores.shape[0]))
+    topk_scores, topk_indices = torch.topk(scores, k=k)
+    maybe_sync_device()
+
+    return (
+        topk_scores.detach().float().cpu().tolist(),
+        topk_indices.detach().cpu().tolist(),
+    )
 
 
-def build_hits(scores: np.ndarray, indices: np.ndarray) -> List[Dict[str, Any]]:
+def build_hits(scores: List[float], indices: List[int]) -> List[Dict[str, Any]]:
     hits: List[Dict[str, Any]] = []
+
     for score, idx in zip(scores, indices):
+        idx = int(idx)
         if idx < 0 or idx >= len(metadata):
             continue
 
@@ -390,15 +466,21 @@ def build_hits(scores: np.ndarray, indices: np.ndarray) -> List[Dict[str, Any]]:
             "item_no": item.get("item_no"),
             "title": item.get("title"),
             "domain": item.get("domain"),
-            "metadata_index": int(idx),
+            "metadata_index": idx,
+            "filename": item.get("filename"),
+            "path": item.get("path"),
         }
         hits.append(hit)
+
     return hits
 
+# ============================================================
+# Gating
+# ============================================================
 
 def apply_domain_gating(
     hits: List[Dict[str, Any]],
-    query_domain: Optional[str]
+    query_domain: Optional[str],
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     if not ENABLE_DOMAIN_GATING:
         return hits, {
@@ -431,7 +513,6 @@ def apply_domain_gating(
     for hit in hits:
         hit_domain = hit.get("domain")
 
-        # fallback heuristic from title if metadata domain missing
         if not hit_domain and hit.get("title"):
             hit_domain = infer_domain_from_title(hit["title"])
 
@@ -440,7 +521,6 @@ def apply_domain_gating(
         else:
             rejected_count += 1
 
-    # fallback: if everything filtered out, keep original hits
     if not filtered:
         return hits, {
             "enabled": True,
@@ -475,8 +555,8 @@ def apply_confidence_gate(hits: List[Dict[str, Any]]) -> Dict[str, Any]:
     top2 = safe_float(hits[1].get("score")) if len(hits) > 1 else None
     margin = None if (top1 is None or top2 is None) else (top1 - top2)
 
-    reasons = []
     matched = True
+    reasons = []
 
     if top1 is None:
         matched = False
@@ -504,7 +584,6 @@ def apply_confidence_gate(hits: List[Dict[str, Any]]) -> Dict[str, Any]:
         "reasons": reasons,
     }
 
-
 # ============================================================
 # Routes
 # ============================================================
@@ -515,20 +594,22 @@ def root() -> Dict[str, Any]:
         "ok": True,
         "title": APP_TITLE,
         "version": APP_VERSION,
-        "device": device,
+        "device": DEVICE_NAME,
     }
 
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
+    emb_shape = tuple(db_embeddings.shape) if db_embeddings is not None else None
     return {
         "ok": True,
-        "device": device,
+        "device": DEVICE_NAME,
         "cuda_available": torch.cuda.is_available(),
+        "mps_available": torch.backends.mps.is_available(),
         "metadata_count": len(metadata),
+        "embeddings_shape": emb_shape,
         "yolo_loaded": yolo_model is not None,
         "clip_loaded": clip_model is not None,
-        "faiss_loaded": faiss_index is not None,
     }
 
 
@@ -537,58 +618,43 @@ async def search_image(image: UploadFile = File(...)) -> Dict[str, Any]:
     t0 = now_ms()
     timings: Dict[str, float] = {}
 
-    # --------------------------------------------------------
-    # Read upload
-    # --------------------------------------------------------
+    # read upload
     t = now_ms()
     raw = await image.read()
     timings["read_upload"] = elapsed_ms(t)
 
-    # --------------------------------------------------------
-    # Decode image
-    # --------------------------------------------------------
+    # decode image
     t = now_ms()
     pil_image = load_image_from_upload(image, raw)
     timings["decode_image"] = elapsed_ms(t)
 
-    # --------------------------------------------------------
-    # Detect / crop
-    # --------------------------------------------------------
+    # detect and crop
     t = now_ms()
     chosen_image, crop_meta, crop_quality, query_domain = detect_and_crop_best(pil_image)
+    maybe_sync_device()
     timings["detect_and_crop"] = elapsed_ms(t)
 
-    # --------------------------------------------------------
-    # Embed query
-    # --------------------------------------------------------
+    # clip embedding
     t = now_ms()
     query_vec = embed_image(chosen_image)
     timings["clip_embedding"] = elapsed_ms(t)
 
-    # --------------------------------------------------------
-    # FAISS search
-    # --------------------------------------------------------
+    # torch retrieval
     t = now_ms()
-    scores, indices = search_faiss(query_vec, TOP_K)
-    timings["faiss_search"] = elapsed_ms(t)
+    scores, indices = search_torch(query_vec, top_k=TOP_K)
+    timings["torch_search"] = elapsed_ms(t)
 
-    # --------------------------------------------------------
-    # Build hits
-    # --------------------------------------------------------
+    # build hits
     t = now_ms()
     hits = build_hits(scores, indices)
     timings["build_hits"] = elapsed_ms(t)
 
-    # --------------------------------------------------------
-    # Domain gate
-    # --------------------------------------------------------
+    # domain gate
     t = now_ms()
     gated_hits, domain_gate = apply_domain_gating(hits, query_domain)
     timings["domain_gating"] = elapsed_ms(t)
 
-    # --------------------------------------------------------
-    # Confidence gate
-    # --------------------------------------------------------
+    # confidence gate
     t = now_ms()
     confidence_gate = apply_confidence_gate(gated_hits)
     timings["confidence_gating"] = elapsed_ms(t)
@@ -597,9 +663,17 @@ async def search_image(image: UploadFile = File(...)) -> Dict[str, Any]:
 
     response_hits = gated_hits[:FINAL_TOP_K]
 
+    print(
+        f"[timing] total={timings['total']} ms, "
+        f"detect={timings['detect_and_crop']} ms, "
+        f"clip={timings['clip_embedding']} ms, "
+        f"search={timings['torch_search']} ms, "
+        f"device={DEVICE_NAME}, matched={confidence_gate['matched']}"
+    )
+
     return {
         "matched": confidence_gate["matched"],
-        "device_used": device,
+        "device_used": DEVICE_NAME,
         "crop_meta": crop_meta,
         "crop_quality": crop_quality,
         "query_embedding_source": "cropped_detection" if crop_quality.get("use_crop") else "original_image",
