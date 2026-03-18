@@ -162,14 +162,19 @@ def evaluate_match_confidence(
     matched = True
     reasons = []
 
+    high_confidence_override = 0.72
+
     if top1_score < min_top1_score:
         matched = False
         reasons.append("top1_below_threshold")
 
-    if top2_score is not None and score_margin < min_top1_top2_margin:
-        matched = False
-        reasons.append("top1_top2_margin_below_threshold")
-
+    if matched and top1_score < high_confidence_override:
+        if top2_score is not None and score_margin < min_top1_top2_margin:
+            matched = False
+            reasons.append("top1_top2_margin_below_threshold")
+    elif matched and top1_score >= high_confidence_override:
+        reasons.append("high_top1_score_override")
+    
     if matched:
         reasons.append("passed_confidence_gate")
 
